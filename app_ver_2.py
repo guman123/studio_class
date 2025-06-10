@@ -23,10 +23,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# OCR 초기화
-ocr = PaddleOCR(lang='korean', use_angle_cls=True)
+# OCR 초기화 (세션에 캐싱)
+@st.cache_resource
+def load_ocr():
+    return PaddleOCR(lang='korean', use_angle_cls=True)
+
+ocr = load_ocr()
 
 # 요약 함수
+@st.cache_data(show_spinner=False)
 def summarize_text_with_zephyr(text):
     prompt = f"다음 글의 핵심을 요약해줘:\n{text}"
     payload = {"inputs": prompt, "parameters": {"max_new_tokens": 300, "temperature": 0.5}}
@@ -41,21 +46,10 @@ def summarize_text_with_zephyr(text):
         return f"요약 실패: {e}\n\n응답: {response.text}"
 
 # 데이터 관리 함수
-def init_data():
-    if not os.path.exists('courses'):
-        os.makedirs('courses')
-    if not os.path.exists('courses/courses.json'):
-        with open('courses/courses.json', 'w', encoding='utf-8') as f:
-            json.dump({}, f)
-    if not os.path.exists('images'):
-        os.makedirs('images')
-    if not os.path.exists('notes.json'):
-        with open('notes.json', 'w', encoding='utf-8') as f:
-            json.dump({}, f)
-
+@st.cache_data(show_spinner=False)
 def load_courses():
     if not os.path.exists('courses/courses.json'):
-        init_data()
+        return {}
     with open('courses/courses.json', 'r', encoding='utf-8') as f:
         return json.load(f)
 
@@ -63,6 +57,20 @@ def save_courses(courses):
     with open('courses/courses.json', 'w', encoding='utf-8') as f:
         json.dump(courses, f, ensure_ascii=False, indent=4)
 
+@st.cache_data(show_spinner=False)
+def load_notes():
+    if os.path.exists('notes.json'):
+        with open('notes.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def save_note(lecture, week, note):
+    notes = load_notes()
+    if lecture not in notes:
+        notes[lecture] = {}
+    notes[lecture][week] = note
+    with open('notes.json', 'w', encoding='utf-8') as f:
+        json.dump(notes, f, ensure_ascii=False, indent=4)
 def create_course_with_schedule(course_name, start_date_str):
     """15주차 강의를 만들고 날짜 정보를 포함합니다."""
     courses = load_courses()
@@ -155,10 +163,7 @@ def load_notes():
             return json.load(f)
     return {}
 
-# 초기화
-init_data()
-
-# 세션 상태 초기화
+# 세션 상태 기본값 초기화
 if 'menu_selection' not in st.session_state:
     st.session_state.menu_selection = '이미지 업로드'
 if 'uploaded_images' not in st.session_state:
@@ -170,7 +175,6 @@ if 'ocr_text' not in st.session_state:
 if 'summary_text' not in st.session_state:
     st.session_state.summary_text = ""
 
-# 메인 앱
 st.title("판서OCR서비스")
 
 # 사이드바 구성

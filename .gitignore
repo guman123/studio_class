@@ -221,4 +221,5 @@ $RECYCLE.BIN/
 test.py
 streamlit.py
 *.json
+/images
 # End of https://www.toptal.com/developers/gitignore/api/windows,python,visualstudioc
