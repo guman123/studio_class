@@ -218,8 +218,9 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 /users
-test.py
+test*
 streamlit.py
 *.json
 /images
+/ocr
 # End of https://www.toptal.com/developers/gitignore/api/windows,python,visualstudioc

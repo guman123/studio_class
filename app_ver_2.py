@@ -7,12 +7,12 @@ import os
 import json
 import hashlib
 import calendar
-import requests
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from paddleocr import PaddleOCR
+import re
 
-# Hugging Face Zephyr 설정
-HF_TOKEN = ""  # 실제 사용 시 토큰 입력 필요
-API_URL = "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta"
+HF_TOKEN = ""   # 실제 사용 시 토큰 입력 필요
 headers = {"Authorization": f"Bearer {HF_TOKEN}"}
 
 # 페이지 설정
@@ -23,27 +23,54 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# OCR 초기화 (세션에 캐싱)
+
+# 모델 ID (HyperCLOVAX 사용)
+model_id = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
+
+@st.cache_resource
+def load_model():
+    model_id = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        device_map="auto",
+        trust_remote_code=True
+    )
+    return tokenizer, model
+
+tokenizer, model = load_model()
+
+# 전처리
+def preprocess_text(text):
+    text = text.replace('\n', ' ')  # 줄바꿈 제거
+    text = re.sub(r'[^가-힣0-9a-zA-Z\s.,!?]', '', text)  # 이상한 문자 제거
+    text = re.sub(r'\s+', ' ', text).strip()  # 공백 정리
+    return text
+
+# 후처리
+def postprocess_summary(text):
+    text = text.strip()
+    text = re.sub(r'\n+', '\n', text)
+    return text
+
+# 텍스트 요약 함수
+def summarize_text(text):
+    preprocessed = preprocess_text(text)
+    prompt = f"다음 글의 내용을 핵심만 요약해줘:\n{preprocessed}"
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048).to(model.device)
+    with torch.no_grad():
+        outputs = model.generate(**inputs, max_new_tokens=300, temperature=0.5, do_sample=True)
+    raw_summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    cleaned_summary = raw_summary.replace(prompt, "").strip()
+    return postprocess_summary(cleaned_summary)
+
+# OCR 초기화 (GPU 사용 가능)
 @st.cache_resource
 def load_ocr():
-    return PaddleOCR(lang='korean', use_angle_cls=True)
+    return PaddleOCR(lang='korean', use_angle_cls=True, use_gpu=torch.cuda.is_available())
 
 ocr = load_ocr()
 
-# 요약 함수
-@st.cache_data(show_spinner=False)
-def summarize_text_with_zephyr(text):
-    prompt = f"다음 글의 핵심을 요약해줘:\n{text}"
-    payload = {"inputs": prompt, "parameters": {"max_new_tokens": 300, "temperature": 0.5}}
-    response = requests.post(API_URL, headers=headers, json=payload)
-    try:
-        result = response.json()
-        if isinstance(result, list) and "generated_text" in result[0]:
-            return result[0]["generated_text"]
-        else:
-            return f"요약 실패: 예상치 못한 응답 형식입니다.\n{result}"
-    except Exception as e:
-        return f"요약 실패: {e}\n\n응답: {response.text}"
 
 # 데이터 관리 함수
 @st.cache_data(show_spinner=False)
@@ -357,7 +384,7 @@ elif st.session_state.menu_selection == '이미지 업로드':
                 for i, img_path in enumerate(uploaded_image_paths):
                     with cols[i % 3]:
                         img = Image.open(img_path)
-                        st.image(img, caption=os.path.basename(img_path), use_column_width=True)
+                        st.image(img, caption=os.path.basename(img_path), use_container_width=True)
                 
                 # OCR 기능 추가
                 if st.button("OCR 실행", key='ocr_execute_btn'):
@@ -378,7 +405,7 @@ elif st.session_state.menu_selection == '이미지 업로드':
             if note.strip():
                 if st.button("요약하기", key='summarize_btn'):
                     with st.spinner("텍스트 요약 중..."):
-                        st.session_state.summary_text = summarize_text_with_zephyr(note)
+                        st.session_state.summary_text = summarize_text(note)
             
             # 요약 결과 표시
             if st.session_state.get("summary_text"):
@@ -456,7 +483,7 @@ else:
                     for i, img_file in enumerate(sorted_images[:9]):  # 최대 9개 이미지만 표시
                         with cols[i % 3]:
                             img = Image.open(os.path.join(user_image_path, img_file))
-                            st.image(img, caption=img_file, use_column_width=True)
+                            st.image(img, caption=img_file, use_container_width=True)
                     
                     # 더 많은 이미지가 있을 경우 선택할 수 있게 함
                     if len(sorted_images) > 9:
@@ -483,7 +510,7 @@ else:
                                     # 요약 옵션 추가
                                     if st.button("OCR 결과 요약하기", key='summarize_ocr_btn'):
                                         with st.spinner("텍스트 요약 중..."):
-                                            summary = summarize_text_with_zephyr(st.session_state.ocr_text)
+                                            summary = summarize_text(st.session_state.ocr_text)
                                             st.session_state.summary_text = summary
                                             st.text_area("요약 결과:", value=summary, height=150, key='ocr_summary_display')
                         else:
@@ -501,7 +528,7 @@ else:
                     # 노트 내용 요약 기능
                     if st.button("필기 내용 요약하기", key='summarize_note_btn'):
                         with st.spinner("필기 내용 요약 중..."):
-                            summary = summarize_text_with_zephyr(notes[lecture_option][selected_week])
+                            summary = summarize_text(notes[lecture_option][selected_week])
                             st.text_area("요약 결과:", value=summary, height=150, key='note_summary_display')
                     
                     # 수정 가능하도록
