@@ -1,19 +1,17 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from PIL import Image
 from datetime import datetime, timedelta
 import os
 import json
-import hashlib
-import calendar
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from paddleocr import PaddleOCR
-import re
+import openai
+from dotenv import load_dotenv
+import os
 
-HF_TOKEN = ""   # 실제 사용 시 토큰 입력 필요
-headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # 페이지 설정
 st.set_page_config(
@@ -23,46 +21,31 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
-# 모델 ID (HyperCLOVAX 사용)
-model_id = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
-
-@st.cache_resource
-def load_model():
-    model_id = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        device_map="auto",
-        trust_remote_code=True
-    )
-    return tokenizer, model
-
-tokenizer, model = load_model()
-
-# 전처리
-def preprocess_text(text):
-    text = text.replace('\n', ' ')  # 줄바꿈 제거
-    text = re.sub(r'[^가-힣0-9a-zA-Z\s.,!?]', '', text)  # 이상한 문자 제거
-    text = re.sub(r'\s+', ' ', text).strip()  # 공백 정리
-    return text
-
-# 후처리
-def postprocess_summary(text):
-    text = text.strip()
-    text = re.sub(r'\n+', '\n', text)
-    return text
-
 # 텍스트 요약 함수
-def summarize_text(text):
-    preprocessed = preprocess_text(text)
-    prompt = f"다음 글의 내용을 핵심만 요약해줘:\n{preprocessed}"
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048).to(model.device)
-    with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=300, temperature=0.5, do_sample=True)
-    raw_summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    cleaned_summary = raw_summary.replace(prompt, "").strip()
-    return postprocess_summary(cleaned_summary)
+def summarize_text(text, lecture=None):
+
+    if lecture:
+        prompt = f"""이 글은 '{lecture}' 강의의 내용이야 강의 내용을 요약하고 즁요한 부분이나 핵심부분 설명해줘. """
+
+    else:
+        prompt = f"""다음 글을 핵심 내용만 요약해주는데 줄바꿈이나 오타는 너가 정리해서 부탁할게:\n\n{text}"""
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",  # gpt-3.5-turbo 또는 gpt-4 선택 가능
+            messages=[
+                {"role": "system", "content": "너는 전문적인 학습 도우미야."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.5,
+            max_tokens=300
+        )
+
+        summary = response["choices"][0]["message"]["content"].strip()
+        return summary
+
+    except Exception as e:
+        return f"[요약 실패: {str(e)}]"
 
 # OCR 초기화 (GPU 사용 가능)
 @st.cache_resource
