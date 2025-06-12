@@ -25,7 +25,7 @@ st.set_page_config(
 def summarize_text(text, lecture=None):
 
     if lecture:
-        prompt = f"""이 글은 '{lecture}' 강의의 내용이야 강의 내용을 요약하고 즁요한 부분이나 핵심부분 설명해줘. """
+        prompt = f"""이 글은 '{lecture}' 강의의 내용이야 강의 내용을 요약하고 즁요한 부분이나 핵심부분 설명해주는데 줄바꿈이나 오타는 너가 정리해서 부탁할게:\n\n{text}. """
 
     else:
         prompt = f"""다음 글을 핵심 내용만 요약해주는데 줄바꿈이나 오타는 너가 정리해서 부탁할게:\n\n{text}"""
